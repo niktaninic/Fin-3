@@ -88,16 +88,11 @@ if SERVER then
         end
     end
 
-    -- https://github.com/Facepunch/garrysmod-issues/issues/5159
-    local m_in_sq = 1 / 39.37 ^ 2 -- in^2 to m^2
-    local const = m_in_sq * 360 / (2 * pi)
+    -- Fix for x86-64
     function Fin3.applyForceOffsetFixed(phys, force, pos)
-        phys:ApplyForceCenter(force)
-
-        local off = pos - phys:LocalToWorld(phys:GetMassCenter())
-        local angf = off:Cross(force) * const
-
-        phys:ApplyTorqueCenter(angf)
+        if IsValid(phys) then
+            phys:ApplyForceOffset(force, pos)
+        end
     end
 
     function Fin3.transmitFin(ent)
