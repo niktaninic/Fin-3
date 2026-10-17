@@ -1,10 +1,26 @@
 local deg, rad, asin, cos, abs, sign, pi = math.deg, math.rad, math.asin, math.cos, math.abs, Fin3.sign, math.pi
-local min, remap, clamp = math.min, math.Remap, math.Clamp
+local min, max, remap, clamp, sqrt = math.min, math.max, math.Remap, math.Clamp, math.sqrt
 local localToWorldVector = Fin3.localToWorldVector
 local roundVectorToAxis = Fin3.roundVectorToAxis
 local applyForceOffsetFixed = Fin3.applyForceOffsetFixed
 local getRootParent = Fin3.getRootParent
 local dt = engine.TickInterval()
+
+-- Upper bound of d(normal force coef)/d(AoA) per radian over all models (flat plate pre-stall is the steepest, ~7.2)
+local maxNormalCoefSlope = 7.2
+
+-- Max share of the opposing airflow all fins on one root may cancel in a single tick. Explicit forces go unstable
+-- around 1 (with the low-pass filter and a tick of lag), at 0.5 any oscillation still dies out within ~20 ticks
+local maxRootStiffness = 0.5
+
+--- Velocity change (in/s) along dir at pos, per unit impulse (kg*in/s) applied there along dir - i.e. 1 / effective mass
+local function pointInvMass(phys, pos, dir)
+    local invInertia = phys:GetInvInertia() -- 1 / kg*m^2, local principal axes, 0 when frozen
+    local r = (phys:WorldToLocal(pos) - phys:GetMassCenter()) / 39.3701
+    local rxd = r:Cross(phys:WorldToLocalVector(dir))
+
+    return phys:GetInvMass() + invInertia.x * rxd.x ^ 2 + invInertia.y * rxd.y ^ 2 + invInertia.z * rxd.z ^ 2
+end
 
 Fin3.fin = {} -- Fin class
 
@@ -354,6 +370,7 @@ function Fin3.fin:calcDragForceNewtons()
     end
 
     dragCoef = dragCoef + self.liftInducedDragCoef
+    self.dragCoef = dragCoef
 
     local drag = 0.5 * dragCoef * Fin3.airDensity * self.surfaceArea * self.velMsSqr * self.efficiency
 
@@ -365,7 +382,32 @@ function Fin3.fin:applyForce(force)
     applyForceOffsetFixed(self.rootPhys, force, self.ent:LocalToWorld(self.massCenter))
 end
 
+--- Aerodynamic forces are applied explicitly once per tick. Once a single tick's force is strong enough to reverse
+--- the airflow it reacts to (high speed, big/efficient fin, light root, long lever arm), the vehicle starts shaking
+--- and eventually explodes. The Tick hook sums g over all fins on a root and, only when it exceeds maxRootStiffness,
+--- scales their forces down to that limit - normal flight is left untouched.
+---@return number g How much of the opposing airflow one tick of this fin's force would cancel (dimensionless)
+function Fin3.fin:calcStiffness()
+    local phys = self.rootPhys
+    local pos = self.ent:LocalToWorld(self.massCenter)
+    local qA = 0.5 * Fin3.airDensity * self.surfaceArea * self.efficiency * sqrt(self.velMsSqr) -- kg/s
+
+    -- d(force)/d(velocity) along the fin normal (lift and normal force) and along the airflow (drag)
+    local normalDamping = qA * maxNormalCoefSlope
+    local dragDamping = 2 * qA * (self.dragCoef or 0)
+
+    local worldUpAxis = localToWorldVector(self.ent, self.upAxis):GetNormalized()
+
+    return dt * max(
+        normalDamping * pointInvMass(phys, pos, worldUpAxis),
+        dragDamping * pointInvMass(phys, pos, self.velNorm)
+    )
+end
+
+--- Calculates this tick's lift and drag, sets self.stiffness if there is a force to apply
 function Fin3.fin:think()
+    self.stiffness = nil
+
     self:calcBaseData()
 
     if not IsValid(self.rootPhys) then return end
@@ -384,10 +426,15 @@ function Fin3.fin:think()
     self:calcLiftForceNewtons()
     self:calcDragForceNewtons()
 
-    local finalLiftVector = self.liftVector * self.liftForceNewtons
+    self.stiffness = self:calcStiffness()
+end
+
+---@param stability number Multiplier from the Tick hook, see Fin3.fin:calcStiffness
+function Fin3.fin:applyForces(stability)
+    local finalLiftVector = self.liftVector * self.liftForceNewtons * stability
     self.ent:SetNW2Vector("fin3_liftVector", finalLiftVector)
 
-    local finalDragVector = -self.velNorm * self.dragForceNewtons
+    local finalDragVector = -self.velNorm * self.dragForceNewtons * stability
     self.ent:SetNW2Vector("fin3_dragVector", finalDragVector)
 
     local totalForce = finalLiftVector + finalDragVector
@@ -443,11 +490,25 @@ function Fin3.fin:remove()
 end
 
 hook.Add("Tick", "fin3_think", function()
+    local rootStiffness = {}
+
     for _, fin in pairs(Fin3.fins) do
         if not IsValid(fin.ent) then
             fin:remove()
         else
             fin:think()
+
+            if fin.stiffness then
+                rootStiffness[fin.rootPhys] = (rootStiffness[fin.rootPhys] or 0) + fin.stiffness
+            end
+        end
+    end
+
+    -- Fins on the same root push the same body, so they have to be stabilized together
+    for _, fin in pairs(Fin3.fins) do
+        if fin.stiffness then
+            local stiffness = rootStiffness[fin.rootPhys]
+            fin:applyForces(stiffness > maxRootStiffness and maxRootStiffness / stiffness or 1)
         end
     end
 end)

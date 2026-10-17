@@ -5,6 +5,7 @@ local sqrt = math.sqrt
 local dt = engine.TickInterval()
 local rad2deg = 180 / pi
 local deg2rad = pi / 180
+local maxStiffness = 0.5 -- See maxRootStiffness in sv_fin3.lua
 
 Fin3.propeller = {}
 
@@ -147,7 +148,6 @@ end
 
 function Fin3.propeller:think()
     local ent = self.ent
-    local phys = self.phys
 
     if not IsValid(self.phys) or self.phys ~= ent:GetPhysicsObject() then
         local newPhys = ent:GetPhysicsObject()
@@ -155,6 +155,8 @@ function Fin3.propeller:think()
 
         if not IsValid(newPhys) then return end
     end
+
+    local phys = self.phys
 
     local forwardAxis = self.forwardAxis
     local forwardVel = ent:WorldToLocal(ent:GetVelocity() + ent:GetPos()):Dot(forwardAxis) / 39.3701 -- m/s
@@ -177,6 +179,19 @@ function Fin3.propeller:think()
     self.rpm = rpm
     self.lastForce = finalForwardForceN
     self.lastTorque = finalTorqueNm
+
+    -- Same explicit force instability as fins (see Fin3.fin:calcStiffness): at high RPM a light propeller's
+    -- aerodynamic torque can reverse its own spin within one tick. Torque grows ~ omega^2, so d(torque)/d(omega) ~ 2 * torque / omega
+    local omega = abs(rotVel * deg2rad)
+    if omega > 1 then
+        local invInertia = phys:GetInvInertia()
+        local axisInvInertia = invInertia.x * forwardAxis.x ^ 2 + invInertia.y * forwardAxis.y ^ 2 + invInertia.z * forwardAxis.z ^ 2
+        local stiffness = dt * 2 * abs(finalTorqueNm) / omega * axisInvInertia
+
+        if stiffness > maxStiffness then
+            finalTorqueNm = finalTorqueNm * maxStiffness / stiffness
+        end
+    end
 
     ent:SetNW2Float("fin3_propeller_thrust", finalForwardForceN)
     ent:SetNW2Float("fin3_propeller_torque", finalTorqueNm)
