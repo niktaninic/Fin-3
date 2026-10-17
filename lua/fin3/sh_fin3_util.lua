@@ -88,11 +88,21 @@ if SERVER then
         end
     end
 
-    -- Fix for x86-64
+    -- https://github.com/Facepunch/garrysmod-issues/issues/5159
+    -- PhysObj:ApplyForceOffset adds extra angular impulse that depends on the object's current
+    -- angular velocity. Aerodynamic forces grow with speed squared, so past a certain speed this
+    -- feeds back on itself and the whole vehicle starts shaking violently. Never use it here.
+    local m_in_sq = 1 / 39.37 ^ 2 -- in^2 to m^2
+    local const = m_in_sq * 360 / (2 * pi)
     function Fin3.applyForceOffsetFixed(phys, force, pos)
-        if IsValid(phys) then
-            phys:ApplyForceOffset(force, pos)
-        end
+        if not IsValid(phys) then return end
+
+        phys:ApplyForceCenter(force)
+
+        local off = pos - phys:LocalToWorld(phys:GetMassCenter())
+        local angf = off:Cross(force) * const
+
+        phys:ApplyTorqueCenter(angf)
     end
 
     function Fin3.transmitFin(ent)

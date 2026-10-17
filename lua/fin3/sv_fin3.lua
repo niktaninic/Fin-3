@@ -24,7 +24,15 @@ Fin creation data table structure:
 ---@param ent Entity Entity to add the fin to
 ---@param data table Fin creation data table
 function Fin3.fin:new(ply, ent, data)
-    if not Fin3.fins[ent] then
+    if not IsValid(ent) or not Fin3.allowedClasses[ent:GetClass()] or not IsValid(ent:GetPhysicsObject()) then return end
+    if not data or not isvector(data.upAxis) or not isvector(data.forwardAxis) then return end
+
+    local rootPhys = getRootParent(ent):GetPhysicsObject()
+    if not IsValid(rootPhys) then return end
+
+    local existingFin = Fin3.fins[ent]
+
+    if not existingFin and IsValid(ply) then
         local finLimit = GetConVar("sbox_max_fin3"):GetInt()
         local currentFinCount = Fin3.playerFinCount[ply] or 0
 
@@ -41,7 +49,7 @@ function Fin3.fin:new(ply, ent, data)
     setmetatable(fin, {__index = Fin3.fin})
 
     fin.ent = ent
-    fin.owner = ply
+    fin.owner = existingFin and existingFin.owner or ply -- Keep counting the fin against whoever created it
     fin.massCenter = ent:GetPhysicsObject():GetMassCenter()
     fin.upAxis = data.upAxis
     fin.forwardAxis = data.forwardAxis
@@ -54,6 +62,12 @@ function Fin3.fin:new(ply, ent, data)
         fin.finType = data.finType
     end
 
+    -- Unknown or hidden types (e.g. a client setting fin3_fintype to anything) would error in the Tick hook every tick
+    local model = Fin3.models[fin.finType]
+    if not model or model.hidden then
+        fin.finType = "standard"
+    end
+
     if data.zeroLiftAngle then
         fin.camber = data.zeroLiftAngle / 8 * 100
     else
@@ -61,7 +75,7 @@ function Fin3.fin:new(ply, ent, data)
     end
     fin.camber = clamp(fin.camber, 0, 100)
 
-    fin.efficiency = clamp(data.efficiency or data.forceMultiplier, 0.1, 1.5) -- Account for old versions
+    fin.efficiency = clamp(tonumber(data.efficiency or data.forceMultiplier) or 1, 0.1, 1.5) -- Account for old versions
 
     if data.inducedDrag == nil then
         fin.inducedDrag = 1
@@ -96,10 +110,6 @@ function Fin3.fin:new(ply, ent, data)
     fin.lastPos = ent:LocalToWorld(fin.massCenter)
 
     fin.angleOfAttack = 0
-
-    local rootPhys = getRootParent(ent):GetPhysicsObject()
-
-    if not IsValid(ent) or not IsValid(rootPhys) or not Fin3.allowedClasses[ent:GetClass()] then return end
 
     rootPhys:EnableDrag(false)
     local _, rotDamping = rootPhys:GetDamping()
@@ -214,6 +224,12 @@ function Fin3.fin:calcBaseData()
 
     local newRootPhys = getRootParent(self.ent):GetPhysicsObject()
 
+    if not IsValid(newRootPhys) then
+        self.rootPhys = nil
+        self.lastPos = ent:LocalToWorld(self.massCenter)
+        return
+    end
+
     if not IsValid(self.rootPhys) or newRootPhys ~= self.rootPhys then
         newRootPhys:EnableDrag(false)
         local _, rotDamping = newRootPhys:GetDamping()
@@ -239,7 +255,7 @@ function Fin3.fin:calcBaseData()
     local upVelNorm = self.velNorm:Dot(worldUpAxis)
 
     if abs(upVelNorm) > 0.999 then
-        self.angleOfAttack = 90 * sign(upVelNorm)
+        self.angleOfAttack = -90 * sign(upVelNorm) -- Same sign as the asin branch below
     else
         self.angleOfAttack = -deg(asin(self.velNorm:Dot(worldUpAxis)))
     end
@@ -397,13 +413,26 @@ function Fin3.fin:remove()
         ent:SetNW2Vector("fin3_liftVector", nil)
         ent:SetNW2Vector("fin3_dragVector", nil)
         ent:SetNW2Float("fin3_sweepAngle", nil)
-
-        if IsValid(self.rootPhys) then
-            self.rootPhys:EnableDrag(true)
-        end
     end
 
     Fin3.fins[ent] = nil
+
+    -- Only give Source's drag back to the vehicle once no other fin is still flying it
+    local rootPhys = self.rootPhys
+    if IsValid(rootPhys) then
+        local rootShared = false
+
+        for _, otherFin in pairs(Fin3.fins) do
+            if otherFin.rootPhys == rootPhys then
+                rootShared = true
+                break
+            end
+        end
+
+        if not rootShared then
+            rootPhys:EnableDrag(true)
+        end
+    end
 
     local owner = self.owner
     if IsValid(owner) and Fin3.playerFinCount[owner] then

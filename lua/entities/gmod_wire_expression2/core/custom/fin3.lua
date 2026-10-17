@@ -20,6 +20,7 @@ do
     e2function void entity:fin3SetBladePitch(number bladePitch)
         local propeller = Fin3.propellers[this]
         if not IsValid(this) or not propeller then return end
+        if not isOwner(self, this) then return end
 
         bladePitch = clamp(bladePitch, -90, 90)
 

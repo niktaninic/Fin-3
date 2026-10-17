@@ -83,7 +83,7 @@ function TOOL:LeftClick(trace)
                 camber = owner:GetInfoNum("fin3_camber", 0),
                 efficiency = owner:GetInfoNum("fin3_efficiency", 1),
                 inducedDrag = owner:GetInfoNum("fin3_induceddrag", 1),
-                disableLowPass = owner:GetInfoNum("fin3_disableLowPass", 0) == 1
+                disableLowPass = owner:GetInfoNum("fin3_disablelowpass", 0) == 1
             })
 
             return true
@@ -106,7 +106,7 @@ function TOOL:LeftClick(trace)
         local upAxis = self.tempUpAxis
         local forwardAxis = self.tempForwardAxis
 
-        if forwardAxis == vector_origin or forwardAxis == upAxis then
+        if not upAxis or not forwardAxis or forwardAxis == vector_origin or forwardAxis == upAxis or forwardAxis == -upAxis then
             self:ClearSelection()
             self:SetStage(0)
 
@@ -120,7 +120,7 @@ function TOOL:LeftClick(trace)
             camber = owner:GetInfoNum("fin3_camber", 0),
             efficiency = owner:GetInfoNum("fin3_efficiency", 1),
             inducedDrag = owner:GetInfoNum("fin3_induceddrag", 1),
-            disableLowPass = owner:GetInfoNum("fin3_disableLowPass", 0) == 1
+            disableLowPass = owner:GetInfoNum("fin3_disablelowpass", 0) == 1
         })
 
         self:ClearSelection()
@@ -179,7 +179,7 @@ function TOOL:RightClick(trace)
         owner:ConCommand("fin3_camber " .. fin.camber)
         owner:ConCommand("fin3_efficiency " .. fin.efficiency)
         owner:ConCommand("fin3_induceddrag " .. fin.inducedDrag)
-        owner:ConCommand("fin3_disableLowPass " .. (fin.disableLowPass and 1 or 0))
+        owner:ConCommand("fin3_disablelowpass " .. (fin.disableLowPass and 1 or 0))
     end
 
     return Fin3.allowedClasses[class]
@@ -195,11 +195,14 @@ function TOOL:Reload(trace)
 
     local ent = trace.Entity
 
-    if SERVER and Fin3.fins[ent] then
-        Fin3.fins[ent]:remove()
+    if SERVER then
+        local fin = Fin3.fins[ent]
+        if fin then fin:remove() end
+
+        return fin ~= nil
     end
 
-    return (SERVER and Fin3.fins[ent]) or ent:GetNW2String("fin3_finType", "") ~= ""
+    return ent:GetNW2String("fin3_finType", "") ~= ""
 end
 
 function TOOL:Holster()
@@ -302,7 +305,7 @@ function TOOL.BuildCPanel(cp)
         local advancedCheckbox = panel:AddCheckbox("#tool.fin3.advanced")
         advancedCheckbox:SetValue(false)
         local advancedSettingsContainer = panel:AddHideableContainer()
-        advancedSettingsContainer:AddCheckbox("#tool.fin3.advanced.disablelowpass", "fin3_disableLowPass"):DockMargin(5, 5, 5, 0)
+        advancedSettingsContainer:AddCheckbox("#tool.fin3.advanced.disablelowpass", "fin3_disablelowpass"):DockMargin(5, 5, 5, 0)
         advancedSettingsContainer:AddHelpText("#tool.fin3.advanced.disablelowpass.info"):DockMargin(10, 5, 10, 5)
         advancedSettingsContainer:SetVisible(false)
 

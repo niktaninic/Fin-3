@@ -12,6 +12,7 @@ return function(instance)
 
 local ents_meta = instance.Types.Entity
 local ents_methods, unwrap = ents_meta.Methods, ents_meta.Unwrap
+local checkpermission = instance.player ~= SF.Superuser and SF.Permissions.check or function() end
 
 -- Fin functions
 do
@@ -36,6 +37,7 @@ do
         local this = unwrap(self)
         local propeller = Fin3.propellers[this]
         if not propeller then return end
+        checkpermission(instance, this, "entities.canTool")
 
         pitch = clamp(pitch, -90, 90)
 

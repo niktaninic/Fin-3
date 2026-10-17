@@ -22,9 +22,16 @@ Propeller creation data table structure:
 ---@param ent Entity Entity to add the propeller to
 ---@param data table Propeller creation data table
 function Fin3.propeller:new(ply, ent, data)
-    local propeller = setmetatable({}, {__index = self})
+    if not IsValid(ent) or not Fin3.allowedClasses[ent:GetClass()] then return end
+    if not data or not isvector(data.forwardAxis) then return end
 
-    if not Fin3.propellers[ent] then
+    local phys = ent:GetPhysicsObject()
+    if not IsValid(phys) then return end
+
+    local propeller = setmetatable({}, {__index = self})
+    local existingPropeller = Fin3.propellers[ent]
+
+    if not existingPropeller and IsValid(ply) then
         local propellerLimit = GetConVar("sbox_max_fin3_propellers"):GetInt()
         local currentPropellerCount = Fin3.playerPropellerCount[ply] or 0
 
@@ -37,19 +44,15 @@ function Fin3.propeller:new(ply, ent, data)
         Fin3.playerPropellerCount[ply] = currentPropellerCount + 1
     end
 
-    local phys = ent:GetPhysicsObject()
-
-    if not IsValid(ent) or not IsValid(phys) or not Fin3.allowedClasses[ent:GetClass()] then return end
-
     propeller.ent = ent
     propeller.phys = phys
-    propeller.owner = ply
+    propeller.owner = existingPropeller and existingPropeller.owner or ply -- Keep counting it against whoever created it
     propeller.forwardAxis = data.forwardAxis
-    propeller.bladeCount = data.bladeCount
-    propeller.diameter = data.diameter
-    propeller.radius = data.diameter / 2
+    propeller.bladeCount = math.Clamp(math.Round(tonumber(data.bladeCount) or 2), 2, 6)
+    propeller.diameter = math.Clamp(tonumber(data.diameter) or 2, 0.1, 6)
+    propeller.radius = propeller.diameter / 2
     propeller.bladeArea = propeller.radius * (propeller.radius / 7) -- Aspect ratio of 7, make adjustable in the future?
-    propeller.bladePitch = data.bladePitch
+    propeller.bladePitch = math.Clamp(tonumber(data.bladePitch) or 15, -90, 90)
     propeller.invertRotation = data.invertRotation
 
     propeller.rpm = 0

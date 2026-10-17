@@ -185,7 +185,7 @@ local function drawFin3Hud(localPly)
 
     local finType = ent:GetNW2String("fin3_finType", "")
 
-    if finType == "" then return end
+    if finType == "" or not fin3Models[finType] then return end
 
     local setUpAxis = localToWorldVector(ent, ent:GetNW2Vector("fin3_upAxis", vector_origin))
     local setForwardAxis = localToWorldVector(ent, ent:GetNW2Vector("fin3_forwardAxis", vector_origin))
